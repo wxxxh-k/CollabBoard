@@ -150,3 +150,30 @@ Saved room boards are written under the server's `data/` directory. The server d
 - Usernames must be unique within a room while connected.
 - Reconnect is available from the workspace header after a connection loss.
 - `python -m client.main` and `python -m server.server` are the supported launch commands. Run them from the project root so package imports resolve correctly.
+
+
+## Participant identity colors
+
+Each participant is assigned a distinct color by the server when joining a room. The participant list displays the username, color swatch, and hex value. Normal drawing tools and chat sender labels use that assigned color; eraser strokes remain white so erasing continues to work. Colors are allocated consistently for all clients in the room while users are connected. The palette expands automatically for larger rooms so active participants continue to receive distinct colors.
+
+## Personal user colors
+
+Each participant chooses a personal color on the login screen before joining a room.
+The selected color is shared by the server and shown consistently to everyone in that
+room. Participants can change their color at any time using **Choose Color** in the
+whiteboard toolbar; the participant list, chat identity color, and future drawings
+update for all connected clients. Existing drawings keep the color they had when made.\n\n### Participant color assignment\n\nThe login screen does not ask for a color. Each participant chooses a preferred color from the whiteboard toolbar. Preferences may be identical; the server assigns a unique actual drawing color per room. The participant list displays the actual assigned color. Changing a preference sends `set_user_color`; the server reallocates a free color and broadcasts `user_color_changed` plus an updated participant list. Drawing messages are colored by the server-assigned color, not by a client-supplied color.\n
+
+## Viewer-relative participant colors
+
+Participants can choose the same preferred color. Each client reserves that
+color for its own user and assigns alternate display colors to other users whose
+preferences collide. These display assignments are local to each viewer; the
+server preserves everyone's original preferred color. The participant list, chat,
+live drawings, and restored board use the same viewer-relative mapping.
+
+Run tests with `python -m unittest discover -s tests -v`.
+
+## Responsive desktop layout
+
+The client window now opens at a size that fits the available display and can be resized or maximized. The board/sidebar divider is draggable. The participant list has its own scrollbar, so additional users do not push the chat composer off-screen. The participant area is height-bounded while chat receives the remaining sidebar space. The drawing toolbar is vertically scrollable on shorter displays.

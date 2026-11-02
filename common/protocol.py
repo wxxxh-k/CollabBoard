@@ -8,7 +8,8 @@ MESSAGE_TYPES = {
     "create_room", "room_created", "join_room", "joined_room",
     "leave_room", "left_room", "draw", "chat", "participants",
     "participant_joined", "participant_left", "board_snapshot",
-    "clear", "undo", "redo", "save_board", "load_board",
+    "clear", "undo", "redo", "save_board", "load_board", "set_user_color",
+    "user_color_changed",
     "save_result", "error", "ping", "pong"
 }
 

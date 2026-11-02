@@ -1,4 +1,5 @@
 import json
+import re
 import socket
 import threading
 from common.protocol import MAX_MESSAGE_SIZE
@@ -77,16 +78,23 @@ class ClientHandler(threading.Thread):
                 self.send_message({"type": "error", "message": "Invalid password"})
                 return
             self.username = username.strip()
+            requested_color = message.get("color", "#2563EB")
+            if not isinstance(requested_color, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", requested_color):
+                requested_color = "#2563EB"
+            self.requested_color = requested_color.upper()
             success, result = self.session_manager.join_room(room_id.strip(), self, password)
             if not success:
                 self.send_message({"type": "error", "message": result})
                 return
             self.client_id, self.room_id = result, room_id.strip()
             self.send_message({"type": "joined_room", "room_id": self.room_id,
-                               "client_id": self.client_id, "username": self.username})
+                               "client_id": self.client_id, "username": self.username,
+                               "preferred_color": self.requested_color,
+                               "color": self.user_color})
             self.send_snapshot()
             self.broadcast({"type": "participant_joined", "client_id": self.client_id,
-                            "username": self.username})
+                            "username": self.username, "color": self.requested_color,
+                            "preferred_color": self.requested_color})
             self.broadcast_participants()
             return
 
@@ -107,16 +115,41 @@ class ClientHandler(threading.Thread):
             if not isinstance(data, dict) or len(json.dumps(data)) > 50000:
                 self.send_message({"type": "error", "message": "Invalid or oversized drawing event"})
                 return
+            data = dict(data)
+            # The server controls the user's identity color so clients cannot spoof it.
+            if data.get("tool") != "eraser":
+                data["color"] = self.requested_color
             event = self.canvas_manager.add_drawing(self.room_id, self.client_id, data)
             if event:
+                event["username"] = self.username
+                event["preferred_color"] = self.requested_color
                 self.broadcast(event)
+        elif kind == "set_user_color":
+            color = message.get("color")
+            if not isinstance(color, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+                self.send_message({"type": "error", "message": "Invalid user color"})
+                return
+            assignment = self.session_manager.update_user_color(
+                self.room_id, self.client_id, color
+            )
+            if assignment is None:
+                self.send_message({"type": "error", "message": "Could not update user color"})
+                return
+            self.requested_color = assignment["preferred_color"]
+            self.user_color = assignment["color"]
+            self.broadcast({"type": "user_color_changed", "client_id": self.client_id,
+                            "username": self.username,
+                            "preferred_color": self.requested_color,
+                            "color": self.requested_color})
+            self.broadcast_participants()
         elif kind == "chat":
             text = message.get("message")
             if not isinstance(text, str) or not text.strip() or len(text) > 2000:
                 self.send_message({"type": "error", "message": "Chat messages must contain 1-2000 characters"})
                 return
             self.broadcast({"type": "chat", "client_id": self.client_id,
-                            "username": self.username, "message": text.strip()})
+                            "username": self.username, "preferred_color": self.requested_color,
+                            "color": self.requested_color, "message": text.strip()})
         elif kind == "undo":
             snapshot = self.canvas_manager.undo(self.room_id, self.client_id)
             if snapshot is not None:
@@ -156,15 +189,19 @@ class ClientHandler(threading.Thread):
     def send_participants(self):
         if not self.room_id:
             return
-        participants = [{"client_id": cid, "username": handler.username}
-                        for cid, handler in self.session_manager.get_clients(self.room_id)]
+        participants = [{"client_id": cid, "username": handler.username,
+                  "color": getattr(handler, "requested_color", "#475569"),
+                  "preferred_color": getattr(handler, "requested_color", "#475569")}
+                 for cid, handler in self.session_manager.get_clients(self.room_id)]
         self.send_message({"type": "participants", "participants": participants})
 
     def broadcast_participants(self):
         if not self.room_id:
             return
-        participants = [{"client_id": cid, "username": handler.username}
-                        for cid, handler in self.session_manager.get_clients(self.room_id)]
+        participants = [{"client_id": cid, "username": handler.username,
+                  "color": getattr(handler, "requested_color", "#475569"),
+                  "preferred_color": getattr(handler, "requested_color", "#475569")}
+                 for cid, handler in self.session_manager.get_clients(self.room_id)]
         self.broadcast({"type": "participants", "participants": participants})
 
     def leave_current_room(self):
@@ -175,7 +212,9 @@ class ClientHandler(threading.Thread):
         self.room_id = self.client_id = None
         self.broadcast({"type": "participant_left", "client_id": old_client}, old_room)
         self.send_message({"type": "left_room"})
-        remaining = [{"client_id": cid, "username": handler.username}
+        remaining = [{"client_id": cid, "username": handler.username,
+                      "color": getattr(handler, "requested_color", "#475569"),
+                  "preferred_color": getattr(handler, "requested_color", "#475569")}
                      for cid, handler in self.session_manager.get_clients(old_room)]
         self.broadcast({"type": "participants", "participants": remaining}, old_room)
 

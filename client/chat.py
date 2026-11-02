@@ -16,6 +16,7 @@ class ChatPanel(tk.Frame):
                          highlightbackground="#E5EAF0")
         self.username = username
         self.send_callback = send_callback
+        self.user_colors = {}
         self._build()
 
     def _build(self):
@@ -47,7 +48,7 @@ class ChatPanel(tk.Frame):
                                                    anchor="nw")
         self.inner.bind("<Configure>", self._update_scroll_region)
         self.canvas.bind("<Configure>", self._resize_inner)
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
 
         # Composer
         composer = tk.Frame(self, bg=self.WHITE, padx=10, pady=10,
@@ -93,6 +94,8 @@ class ChatPanel(tk.Frame):
 
     def _resize_inner(self, event):
         self.canvas.itemconfigure(self.window_id, width=event.width)
+        # Keep message bubbles inside the available sidebar width.
+        self.message_wrap = max(110, min(260, event.width - 85))
 
     def _on_mousewheel(self, event):
         if self.winfo_exists():
@@ -108,8 +111,15 @@ class ChatPanel(tk.Frame):
             self.message_entry.config(fg=self.TEXT)
             self.message_entry.focus_set()
 
-    def display_message(self, username, message, timestamp=None, is_own=None):
+    def set_user_colors(self, users):
+        self.user_colors = {
+            item.get("username"): item.get("color", "#64748B")
+            for item in (users or []) if isinstance(item, dict)
+        }
+
+    def display_message(self, username, message, timestamp=None, is_own=None, color=None):
         timestamp = timestamp or datetime.now().strftime("%H:%M")
+        color = color or self.user_colors.get(username, "#64748B")
         own = (username == self.username) if is_own is None else is_own
         system = username == "CollabBoard"
 
@@ -129,21 +139,21 @@ class ChatPanel(tk.Frame):
 
             if not own:
                 initials = "".join(part[0] for part in str(username).split()[:2]).upper()
-                avatar = tk.Label(row, text=initials or "U", bg="#DCE7F0",
-                                  fg="#52677A", font=("Arial", 7, "bold"),
+                avatar = tk.Label(row, text=initials or "U", bg=color,
+                                  fg="#FFFFFF", font=("Arial", 7, "bold"),
                                   width=3, height=1, padx=2, pady=4)
                 avatar.pack(side="left", anchor="s", padx=(0, 5), pady=(0, 15))
 
             if not own:
                 tk.Label(bubble_column, text=str(username), bg=self.BG,
-                         fg=self.MUTED, font=("Arial", 7, "bold")).pack(anchor="w", pady=(0, 2))
+                         fg=color, font=("Arial", 7, "bold")).pack(anchor="w", pady=(0, 2))
 
-            bubble_bg = self.BLUE if own else self.WHITE
+            bubble_bg = color if own else self.WHITE
             bubble_fg = self.WHITE if own else self.TEXT
             bubble = tk.Label(
                 bubble_column, text=str(message), bg=bubble_bg, fg=bubble_fg,
                 font=("Arial", 9), justify="left", anchor="w",
-                wraplength=205, padx=10, pady=7, relief="flat",
+                wraplength=max(110, min(260, self.canvas.winfo_width() - 85)), padx=10, pady=7, relief="flat",
                 highlightthickness=0
             )
             bubble.pack(anchor="e" if own else "w")

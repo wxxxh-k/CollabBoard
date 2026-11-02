@@ -2,6 +2,8 @@ import threading
 import uuid
 import hashlib
 import secrets
+import re
+from common.user_colors import DEFAULT_USER_COLOR, normalize_color
 
 
 class SessionManager:
@@ -103,6 +105,13 @@ class SessionManager:
                 return False, "That username is already in use in this room"
 
             client_id = str(uuid.uuid4())
+            requested_color = normalize_color(
+                getattr(client, "requested_color", DEFAULT_USER_COLOR)
+            )
+            client.requested_color = requested_color
+            # Store the user's preference only. Each client resolves collisions
+            # independently from its own point of view.
+            client.user_color = requested_color
             room["clients"][client_id] = client
 
             print(
@@ -114,6 +123,18 @@ class SessionManager:
     # --------------------------------
     # LEAVE ROOM
     # --------------------------------
+
+    def update_user_color(self, room_id, client_id, preferred_color):
+        """Update and return the participant's preferred color (not a global allocation)."""
+        with self.lock:
+            room = self.rooms.get(room_id)
+            if not room or client_id not in room["clients"]:
+                return None
+            client = room["clients"][client_id]
+            preferred = normalize_color(preferred_color)
+            client.requested_color = preferred
+            client.user_color = preferred
+            return {"preferred_color": preferred, "color": preferred}
 
     def leave_room(self, room_id, client_id):
 

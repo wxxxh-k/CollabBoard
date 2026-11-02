@@ -16,7 +16,7 @@ class SyncManager:
         self.last_sequence = 0
         self.event_lock = threading.RLock()
 
-    def join_room(self, host, port, room_id, username, password=None):
+    def join_room(self, host, port, room_id, username, password=None, color="#2563EB"):
         # Drop stale disconnect or event notifications from a previous connection.
         while self.network.get_message() is not None:
             pass
@@ -25,7 +25,8 @@ class SyncManager:
         if not self.network.connect(host, port):
             return False
         self.room_id, self.username = room_id, username
-        message = {"type": "join_room", "room_id": room_id, "username": username}
+        message = {"type": "join_room", "room_id": room_id, "username": username,
+                   "color": color}
         if password:
             message["password"] = password
         if not self.network.send_message(message):
@@ -40,6 +41,9 @@ class SyncManager:
             return False
         data = operation.get("data", operation)
         return self.network.send_message({"type": "draw", "data": data})
+
+    def set_user_color(self, color):
+        return self.network.send_message({"type": "set_user_color", "color": color})
 
     def send_chat(self, message):
         return self.network.send_message({"type": "chat", "message": message})

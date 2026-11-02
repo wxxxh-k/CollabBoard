@@ -13,7 +13,10 @@ class Whiteboard:
         self.on_redo = on_redo
         self.on_save = on_save
         self.on_load = on_load
+        self.on_color_change = None
         self.tool, self.color, self.width = "pen", "#2563EB", 3
+        self.user_color = "#2563EB"       # actual server-assigned drawing color
+        self.preferred_color = "#2563EB"  # user's requested preference
         self.points, self.preview = [], None
         self.operations = []
         self._build()
@@ -47,8 +50,30 @@ class Whiteboard:
         self.tool = tool
         self.status.config(text=f"Tool: {tool.title()}")
 
+    def set_user_color(self, color):
+        """Apply the actual, unique color assigned by the server."""
+        if not isinstance(color, str) or len(color) != 7 or not color.startswith("#"):
+            return
+        self.user_color = color.upper()
+        self.color = self.user_color
+        self.status.config(text=f"Your assigned drawing color: {self.user_color}")
+
+    def set_preferred_color(self, color):
+        """Update the local preference preview (not the actual drawing color)."""
+        if not isinstance(color, str) or len(color) != 7 or not color.startswith("#"):
+            return
+        self.preferred_color = color.upper()
+        if hasattr(self, "toolbar"):
+            self.toolbar.color_display.config(bg=self.preferred_color)
+
     def set_color(self, color):
-        self.color = color
+        # A toolbar selection is a preference; the server decides the actual color.
+        self.set_preferred_color(color)
+        # The viewer always uses their own selected preference immediately.
+        self.user_color = self.preferred_color
+        self.color = self.user_color
+        if self.on_color_change:
+            self.on_color_change(color)
 
     def change_width(self, value):
         self.width = int(float(value))
@@ -103,16 +128,19 @@ class Whiteboard:
         self.points = []
 
     def publish(self, data):
+        data = dict(data)
+        if data.get("tool") != "eraser":
+            data["color"] = self.user_color
         operation = {"type": "draw", "data": data}
         # Render local event immediately; server echo is deduplicated by sequence in SyncManager.
         self.apply_operation(operation)
         if self.on_operation:
             self.on_operation(operation)
 
-    def apply_operation(self, operation):
+    def apply_operation(self, operation, display_color=None):
         data = operation.get("data", {})
         tool = data.get("tool")
-        color = "white" if tool == "eraser" else data.get("color", "#000000")
+        color = "white" if tool == "eraser" else (display_color or data.get("color", "#000000"))
         width = int(data.get("width", 3)) * (4 if tool == "eraser" else 1)
         if tool in ("pen", "eraser"):
             points = data.get("points", [])

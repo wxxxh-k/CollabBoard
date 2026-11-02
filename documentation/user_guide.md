@@ -36,4 +36,4 @@ Use **Reconnect** in the workspace header after the server or network becomes av
 
 ## Exit
 
-Close the workspace window to disconnect. The server remains running for other clients.
+Close the workspace window to disconnect. The server remains running for other clients.\n\n### Participant color assignment\n\nThe login screen does not ask for a color. Each participant chooses a preferred color from the whiteboard toolbar. Preferences may be identical; the server assigns a unique actual drawing color per room. The participant list displays the actual assigned color. Changing a preference sends `set_user_color`; the server reallocates a free color and broadcasts `user_color_changed` plus an updated participant list. Drawing messages are colored by the server-assigned color, not by a client-supplied color.\n

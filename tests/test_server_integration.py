@@ -90,6 +90,43 @@ class ServerIntegrationTests(unittest.TestCase):
         second.close()
         third.close()
 
+
+    def test_server_preserves_preferences_for_viewer_relative_colors(self):
+        first = socket.create_connection(("127.0.0.1", self.port), timeout=3)
+        first.settimeout(3)
+        send(first, {"type": "join_room", "room_id": "default",
+                     "username": "Alice", "color": "#2563EB"})
+        first_messages = [receive(first) for _ in range(4)]
+        self.assertEqual(first_messages[0]["preferred_color"], "#2563EB")
+        self.assertEqual(first_messages[0]["color"], "#2563EB")
+
+        second = socket.create_connection(("127.0.0.1", self.port), timeout=3)
+        second.settimeout(3)
+        send(second, {"type": "join_room", "room_id": "default",
+                      "username": "Bob", "color": "#2563EB"})
+        second_messages = [receive(second) for _ in range(4)]
+        self.assertEqual(second_messages[0]["preferred_color"], "#2563EB")
+        self.assertEqual(second_messages[0]["color"], "#2563EB")
+
+        # Both participant records retain the same preference. The clients
+        # calculate different display colors with their own identity first.
+        alice_join_events = [receive(first), receive(first)]
+        participant_list = alice_join_events[-1]["participants"]
+        self.assertEqual([user["preferred_color"] for user in participant_list],
+                         ["#2563EB", "#2563EB"])
+
+        send(first, {"type": "set_user_color", "color": "#16A36A"})
+        alice_update = receive(first)
+        bob_update = receive(second)
+        self.assertEqual(alice_update["type"], "user_color_changed")
+        self.assertEqual(bob_update["type"], "user_color_changed")
+        self.assertEqual(alice_update["preferred_color"], "#16A36A")
+        self.assertEqual(alice_update["color"], "#16A36A")
+        self.assertEqual(bob_update["preferred_color"], "#16A36A")
+
+        first.close()
+        second.close()
+
     def test_reject_duplicate_username_and_unknown_room(self):
         first, _ = self.connect_and_join("SameName")
         duplicate = socket.create_connection(("127.0.0.1", self.port), timeout=3)

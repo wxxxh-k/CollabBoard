@@ -1,6 +1,7 @@
 
 import tkinter as tk
 from tkinter import messagebox
+from common.user_colors import DEFAULT_USER_COLOR
 
 
 class LoginWindow:
@@ -10,10 +11,11 @@ class LoginWindow:
         self.on_join = on_join
 
         self.root.title("CollabBoard - Login")
-        self.root.geometry("450x700")
+        self.root.geometry("450x620")
         self.root.resizable(False, False)
         self.root.configure(bg="#171923")
 
+        self.selected_color = DEFAULT_USER_COLOR
         self.create_widgets()
 
     def create_widgets(self):
@@ -120,4 +122,4 @@ class LoginWindow:
             )
             return
 
-        self.on_join(username, server_ip, port, room, password)
+        self.on_join(username, server_ip, port, room, password, self.selected_color)

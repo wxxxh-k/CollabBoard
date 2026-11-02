@@ -28,27 +28,27 @@ class CollabBoardApp:
         else:
             self.pending_events.put(event)
 
-    def join_room(self, username, host, port, room, password):
+    def join_room(self, username, host, port, room, password, color):
         self.login.status.config(text="Connecting to server...")
-        self.connection = (username, host, port, room, password)
+        self.connection = (username, host, port, room, password, color)
         threading.Thread(target=self._connect_worker, args=(self.connection,), daemon=True).start()
 
     def _connect_worker(self, connection):
-        username, host, port, room, password = connection
-        connected = self.sync.join_room(host, port, room, username, password)
+        username, host, port, room, password, color = connection
+        connected = self.sync.join_room(host, port, room, username, password, color)
         self.ui_results.put(("join_result", connected, username, room))
 
     def reconnect(self):
         if not self.connection:
             return
         self.sync.disconnect()
-        username, host, port, room, password = self.connection
+        username, host, port, room, password, color = self.connection
         self.state.load_snapshot({"events": [], "last_sequence": 0})
         threading.Thread(target=self._reconnect_worker, args=(self.connection,), daemon=True).start()
 
     def _reconnect_worker(self, connection):
-        username, host, port, room, password = connection
-        connected = self.sync.join_room(host, port, room, username, password)
+        username, host, port, room, password, color = connection
+        connected = self.sync.join_room(host, port, room, username, password, color)
         self.ui_results.put(("reconnect_result", connected))
 
     def process_ui_results(self):
