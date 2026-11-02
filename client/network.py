@@ -5,6 +5,7 @@ import queue
 
 from common.protocol import (
     encode_message,
+    decode_message,
     DISCONNECTED
 )
 
@@ -16,27 +17,17 @@ class NetworkClient:
     """
 
     def __init__(self):
-
-        # TCP socket
         self.sock = None
-
-        # Connection status
         self.connected = False
 
-        # Thread safety for sending
         self.send_lock = threading.Lock()
-
-        # Queue for received messages
         self.message_queue = queue.Queue()
 
-        # Receiver thread
         self.receiver_thread = None
-
-        # Prevent multiple receiver threads
         self.connection_lock = threading.Lock()
 
     # ----------------------------------
-    # 1. CONNECT TO SERVER
+    # CONNECT TO SERVER
     # ----------------------------------
 
     def connect(self, host, port):
@@ -47,14 +38,12 @@ class NetworkClient:
                 return True
 
             try:
-
                 self.sock = socket.create_connection(
                     (host, port),
                     timeout=5
                 )
 
                 self.sock.settimeout(None)
-
                 self.connected = True
 
                 self.receiver_thread = threading.Thread(
@@ -65,19 +54,15 @@ class NetworkClient:
                 self.receiver_thread.start()
 
                 print("Connected to CollabBoard server!")
-
                 return True
 
             except OSError as error:
-
                 print("Connection failed:", error)
-
                 self.connected = False
-
                 return False
 
     # ----------------------------------
-    # 2. SEND MESSAGE TO SERVER
+    # SEND MESSAGE
     # ----------------------------------
 
     def send_message(self, message):
@@ -86,7 +71,6 @@ class NetworkClient:
             return False
 
         try:
-
             encoded_message = encode_message(message)
 
             with self.send_lock:
@@ -99,15 +83,12 @@ class NetworkClient:
             return True
 
         except OSError as error:
-
             print("Send error:", error)
-
             self.disconnect()
-
             return False
 
     # ----------------------------------
-    # 3. RECEIVE MESSAGES
+    # RECEIVE MESSAGES
     # ----------------------------------
 
     def receive_messages(self):
@@ -115,7 +96,6 @@ class NetworkClient:
         buffer = b""
 
         try:
-
             while self.connected:
 
                 chunk = self.sock.recv(4096)
@@ -125,28 +105,22 @@ class NetworkClient:
 
                 buffer += chunk
 
-                # Extract complete JSON messages
                 while b"\n" in buffer:
 
-                    line, buffer = buffer.split(
-                        b"\n", 1
-                    )
+                    line, buffer = buffer.split(b"\n", 1)
 
                     if not line.strip():
                         continue
 
                     try:
+                        message = decode_message(line)
 
-                        import json
-
-                        message = json.loads(
-                            line.decode("utf-8")
-                        )
-
-                        self.message_queue.put(message)
+                        if isinstance(message, dict):
+                            self.message_queue.put(message)
+                        else:
+                            print("Invalid message format received")
 
                     except (ValueError, UnicodeDecodeError):
-
                         print("Invalid message received")
 
         except OSError as error:
@@ -155,7 +129,6 @@ class NetworkClient:
                 print("Receive error:", error)
 
         finally:
-
             self.connected = False
 
             self.message_queue.put({
@@ -163,21 +136,19 @@ class NetworkClient:
             })
 
     # ----------------------------------
-    # 4. GET RECEIVED MESSAGE
+    # GET RECEIVED MESSAGE
     # ----------------------------------
 
     def get_message(self):
 
         try:
-
             return self.message_queue.get_nowait()
 
         except queue.Empty:
-
             return None
 
     # ----------------------------------
-    # 5. DISCONNECT FROM SERVER
+    # DISCONNECT
     # ----------------------------------
 
     def disconnect(self):
@@ -188,13 +159,11 @@ class NetworkClient:
 
             try:
                 self.sock.shutdown(socket.SHUT_RDWR)
-
             except OSError:
                 pass
 
             try:
                 self.sock.close()
-
             except OSError:
                 pass
 

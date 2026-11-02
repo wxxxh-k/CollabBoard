@@ -5,17 +5,17 @@ from tkinter import colorchooser, simpledialog
 
 class Whiteboard:
 
-    def __init__(self, root, on_operation=None):
+    def __init__(self, root, on_operation=None, on_clear=None):
 
         self.root = root
         self.on_operation = on_operation
+        self.on_clear = on_clear
 
         self.root.title("CollabBoard - Collaborative Whiteboard")
         self.root.geometry("1200x750")
         self.root.minsize(850, 550)
         self.root.configure(bg="#17243B")
 
-        # Drawing settings
         self.tool = "pen"
         self.color = "#2563EB"
         self.width = 3
@@ -24,9 +24,9 @@ class Whiteboard:
         self.start_y = 0
         self.last_x = 0
         self.last_y = 0
+
         self.points = []
         self.preview = None
-
         self.operations = []
 
         # Header
@@ -59,8 +59,10 @@ class Whiteboard:
         toolbar.pack_propagate(False)
 
         tk.Label(
-            toolbar, text="DRAWING TOOLS",
-            bg="#263750", fg="#CBD5E1",
+            toolbar,
+            text="DRAWING TOOLS",
+            bg="#263750",
+            fg="#CBD5E1",
             font=("Arial", 10, "bold")
         ).pack(pady=15)
 
@@ -72,32 +74,43 @@ class Whiteboard:
         self.add_tool(toolbar, "Text", "text")
 
         tk.Label(
-            toolbar, text="COLOR",
-            bg="#263750", fg="white"
+            toolbar,
+            text="COLOR",
+            bg="#263750",
+            fg="white"
         ).pack(pady=(20, 5))
 
         tk.Button(
-            toolbar, text="Choose Color",
+            toolbar,
+            text="Choose Color",
             command=self.choose_color,
-            bg="#334B6B", fg="white",
+            bg="#334B6B",
+            fg="white",
             relief="flat"
         ).pack(fill="x", padx=12)
 
         self.color_display = tk.Label(
-            toolbar, bg=self.color, height=1
+            toolbar,
+            bg=self.color,
+            height=1
         )
         self.color_display.pack(fill="x", padx=12, pady=5)
 
         tk.Label(
-            toolbar, text="BRUSH SIZE",
-            bg="#263750", fg="white"
+            toolbar,
+            text="BRUSH SIZE",
+            bg="#263750",
+            fg="white"
         ).pack(pady=(15, 5))
 
         self.size_slider = tk.Scale(
-            toolbar, from_=1, to=20,
+            toolbar,
+            from_=1,
+            to=20,
             orient="horizontal",
             command=self.change_width,
-            bg="#263750", fg="white",
+            bg="#263750",
+            fg="white",
             highlightthickness=0,
             troughcolor="#64748B"
         )
@@ -105,13 +118,15 @@ class Whiteboard:
         self.size_slider.pack(fill="x", padx=8)
 
         tk.Button(
-            toolbar, text="Clear Canvas",
+            toolbar,
+            text="Clear Canvas",
             command=self.clear_canvas,
-            bg="#991B1B", fg="white",
+            bg="#991B1B",
+            fg="white",
             relief="flat"
         ).pack(fill="x", padx=12, pady=20)
 
-        # White drawing canvas
+        # Drawing canvas
         canvas_frame = tk.Frame(main, bg="#DCE3EC")
         canvas_frame.pack(side="left", fill="both", expand=True)
 
@@ -132,12 +147,17 @@ class Whiteboard:
         self.status = tk.Label(
             root,
             text="Ready | Tool: Pen | Local Mode",
-            bg="#17243B", fg="#CBD5E1",
-            anchor="w", padx=15
+            bg="#17243B",
+            fg="#CBD5E1",
+            anchor="w",
+            padx=15
         )
         self.status.pack(fill="x", pady=5)
 
-    # Tool selection
+    # ----------------------------------
+    # TOOL SELECTION
+    # ----------------------------------
+
     def add_tool(self, parent, name, tool):
 
         tk.Button(
@@ -157,10 +177,13 @@ class Whiteboard:
         self.tool = tool
 
         self.status.config(
-            text=f"Ready | Tool: {tool.title()} | Local Mode"
+            text=f"Ready | Tool: {tool.title()}"
         )
 
-    # Color selection
+    # ----------------------------------
+    # COLOR AND WIDTH
+    # ----------------------------------
+
     def choose_color(self):
 
         selected = colorchooser.askcolor(
@@ -171,16 +194,19 @@ class Whiteboard:
             self.color = selected
             self.color_display.config(bg=selected)
 
-    # Brush thickness
     def change_width(self, value):
 
         self.width = int(float(value))
 
-    # Mouse pressed
+    # ----------------------------------
+    # START DRAWING
+    # ----------------------------------
+
     def start_drawing(self, event):
 
         self.start_x = event.x
         self.start_y = event.y
+
         self.last_x = event.x
         self.last_y = event.y
 
@@ -191,7 +217,10 @@ class Whiteboard:
         self.points = [[event.x, event.y]]
         self.preview = None
 
-    # Mouse movement
+    # ----------------------------------
+    # DRAW PREVIEW
+    # ----------------------------------
+
     def draw(self, event):
 
         if self.tool == "text" or not self.points:
@@ -208,7 +237,10 @@ class Whiteboard:
             )
 
             self.canvas.create_line(
-                self.last_x, self.last_y, x, y,
+                self.last_x,
+                self.last_y,
+                x,
+                y,
                 fill=current_color,
                 width=self.width * (
                     4 if self.tool == "eraser" else 1
@@ -225,31 +257,51 @@ class Whiteboard:
                 self.canvas.delete(self.preview)
 
             if self.tool == "line":
+
                 self.preview = self.canvas.create_line(
-                    self.start_x, self.start_y, x, y,
-                    fill=self.color, width=self.width
+                    self.start_x,
+                    self.start_y,
+                    x,
+                    y,
+                    fill=self.color,
+                    width=self.width
                 )
 
             elif self.tool == "rectangle":
+
                 self.preview = self.canvas.create_rectangle(
-                    self.start_x, self.start_y, x, y,
-                    outline=self.color, width=self.width
+                    self.start_x,
+                    self.start_y,
+                    x,
+                    y,
+                    outline=self.color,
+                    width=self.width
                 )
 
             elif self.tool == "circle":
+
                 self.preview = self.canvas.create_oval(
-                    self.start_x, self.start_y, x, y,
-                    outline=self.color, width=self.width
+                    self.start_x,
+                    self.start_y,
+                    x,
+                    y,
+                    outline=self.color,
+                    width=self.width
                 )
 
         self.last_x = x
         self.last_y = y
 
-    # Mouse released
+    # ----------------------------------
+    # STOP DRAWING
+    # ----------------------------------
+
     def stop_drawing(self, event):
 
         if self.tool == "text" or not self.points:
             return
+
+        self.points.append([event.x, event.y])
 
         operation = {
             "type": "DRAW",
@@ -257,7 +309,7 @@ class Whiteboard:
                 "tool": self.tool,
                 "color": self.color,
                 "width": self.width,
-                "points": self.points
+                "points": list(self.points)
             }
         }
 
@@ -265,16 +317,19 @@ class Whiteboard:
             self.canvas.delete(self.preview)
             self.preview = None
 
-        # Save operation locally
-        self.operations.append(operation)
+        # Render final operation locally
+        self.apply_operation(operation)
 
-        # Notify networking module later
+        # Send operation to synchronization manager
         if self.on_operation:
             self.on_operation(operation)
 
         self.points = []
 
-    # Text annotation
+    # ----------------------------------
+    # TEXT ANNOTATION
+    # ----------------------------------
+
     def add_text(self, x, y):
 
         text = simpledialog.askstring(
@@ -301,22 +356,25 @@ class Whiteboard:
             if self.on_operation:
                 self.on_operation(operation)
 
-    # Render an operation on the canvas
+    # ----------------------------------
+    # APPLY DRAWING OPERATION
+    # ----------------------------------
+
     def apply_operation(self, operation):
 
-        data = operation["data"]
-        tool = data["tool"]
+        data = operation.get("data", {})
+        tool = data.get("tool")
 
         if tool in ("pen", "eraser"):
 
-            points = data["points"]
+            points = data.get("points", [])
 
             color = (
                 "white" if tool == "eraser"
-                else data["color"]
+                else data.get("color", "#000000")
             )
 
-            width = data["width"] * (
+            width = data.get("width", 3) * (
                 4 if tool == "eraser" else 1
             )
 
@@ -333,10 +391,16 @@ class Whiteboard:
 
         elif tool in ("line", "rectangle", "circle"):
 
-            x1, y1 = data["points"][0]
-            x2, y2 = data["points"][-1]
+            points = data.get("points", [])
+
+            if not points:
+                return
+
+            x1, y1 = points[0]
+            x2, y2 = points[-1]
 
             if tool == "line":
+
                 self.canvas.create_line(
                     x1, y1, x2, y2,
                     fill=data["color"],
@@ -344,6 +408,7 @@ class Whiteboard:
                 )
 
             elif tool == "rectangle":
+
                 self.canvas.create_rectangle(
                     x1, y1, x2, y2,
                     outline=data["color"],
@@ -351,6 +416,7 @@ class Whiteboard:
                 )
 
             elif tool == "circle":
+
                 self.canvas.create_oval(
                     x1, y1, x2, y2,
                     outline=data["color"],
@@ -360,7 +426,8 @@ class Whiteboard:
         elif tool == "text":
 
             self.canvas.create_text(
-                data["x"], data["y"],
+                data["x"],
+                data["y"],
                 text=data["text"],
                 fill=data["color"],
                 font=("Arial", 14)
@@ -368,11 +435,51 @@ class Whiteboard:
 
         self.operations.append(operation)
 
-    # Clear local canvas
-    def clear_canvas(self):
+    # ----------------------------------
+    # APPLY REMOTE DRAWING
+    # ----------------------------------
+
+    def apply_remote_operation(self, event):
+
+        operation = {
+            "type": "DRAW",
+            "data": event.get("data", {})
+        }
+
+        self.apply_operation(operation)
+
+    # ----------------------------------
+    # LOAD CANVAS SNAPSHOT
+    # ----------------------------------
+
+    def load_canvas(self, board):
 
         self.canvas.delete("all")
         self.operations.clear()
+
+        for event in board:
+
+            self.apply_remote_operation(event)
+
+    # ----------------------------------
+    # CLEAR CANVAS
+    # ----------------------------------
+
+    def clear_canvas(self):
+
+        if self.on_clear:
+            self.on_clear()
+        else:
+            self.canvas.delete("all")
+            self.operations.clear()
+
+    # ----------------------------------
+    # UPDATE STATUS
+    # ----------------------------------
+
+    def update_status(self, message):
+
+        self.status.config(text=message)
 
 
 if __name__ == "__main__":
