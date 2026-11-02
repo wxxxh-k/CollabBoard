@@ -1,0 +1,2 @@
+# CollabBoard uses only Python standard-library modules.
+# Tkinter is included with most desktop Python installations.
