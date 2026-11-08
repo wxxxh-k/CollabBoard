@@ -9,7 +9,8 @@ from client.conversations import ConversationStore, GROUP
 from client.participants import ParticipantsPanel
 from client.whiteboard import Whiteboard
 from client.widgets import PillButton, draw_icon, round_rect
-from common.user_colors import DEFAULT_USER_COLOR, build_viewer_color_map, normalize_color
+from common.user_colors import (DEFAULT_USER_COLOR, StrokeColorResolver,
+                                build_viewer_color_map, normalize_color)
 
 MIN_WIDTH, MIN_HEIGHT = 760, 500
 SIDEBAR_MIN, SIDEBAR_MAX = 270, 340
@@ -26,6 +27,8 @@ class MainWindow:
         self.viewer_id = getattr(sync_manager, "client_id", None)
         self.viewer_preferred_color = DEFAULT_USER_COLOR
         self.color_map = {}
+        self.current_preferences = {}
+        self.stroke_colors = StrokeColorResolver()
         self.live_users = []            # participants currently in the room (from the server)
         self.store = ConversationStore()  # group + private conversation histories
         self.store.set_viewer(self.viewer_id)
@@ -75,7 +78,9 @@ class MainWindow:
         tk.Label(header, text="CollabBoard", font=(theme.FONT, 15, "bold"),
                  fg="white", bg=theme.BG_PANEL).pack(side="left")
         tk.Label(header, text=f"Room: {self.room}", fg="#A5B4FC", bg=theme.BG_APP,
-                 font=(theme.FONT, 9), padx=10, pady=4).pack(side="left", padx=14)
+                 font=(theme.FONT, 9), padx=10, pady=4).pack(side="left", padx=(14, 4))
+        PillButton(header, "Copy ID", self.copy_room_id, bg="#374151",
+                   hover="#4B5563").pack(side="left", padx=3, pady=10)
 
         # Grid layout: the whiteboard column takes all spare space, the sidebar has a
         # bounded width and can be hidden entirely on small windows.
@@ -95,7 +100,8 @@ class MainWindow:
 
         self.participants = ParticipantsPanel(
             self.sidebar, self.username,
-            on_open_private=self.open_private, on_open_group=self.open_group)
+            on_open_private=self.open_private, on_open_group=self.open_group,
+            on_manage_role=self._manage_role if getattr(self.sync, "role", "student") == "host" else None)
         self.participants.pack(fill="x", expand=False)
         self.chat = ChatPanel(self.sidebar, self.username,
                               send_callback=self.send_from_chat,
@@ -112,6 +118,8 @@ class MainWindow:
             on_load=self.sync.load_board
         )
         self.whiteboard.on_color_change = self.sync.set_user_color
+        self.whiteboard.on_cursor_move = self._send_cursor
+        self.role = getattr(self.sync, "role", "student")
         self.whiteboard.update_status("Connected to server")
         self._refresh_conversation_ui()
         self.root.bind("<Configure>", self._adapt_layout, add="+")
@@ -194,6 +202,17 @@ class MainWindow:
         self.color_map = build_viewer_color_map(
             self.viewer_id, self.viewer_preferred_color, color_users
         )
+        self.current_preferences = {
+            u.get("client_id"): normalize_color(u.get("preferred_color", u.get("color", DEFAULT_USER_COLOR)))
+            for u in users}
+        # Authors who already left (or rejoined under a new id) keep their first
+        # stroke color as the mapped one; strokes they drew in another color
+        # then keep that own color instead of being recolored.
+        for item in color_users[len(users):]:
+            self.current_preferences.setdefault(
+                item.get("client_id"), normalize_color(item.get("preferred_color", DEFAULT_USER_COLOR)))
+        if self.viewer_id is not None:
+            self.current_preferences[self.viewer_id] = normalize_color(self.viewer_preferred_color)
 
         def with_display_color(user):
             item = dict(user)
@@ -221,13 +240,16 @@ class MainWindow:
         data = dict(event.get("data", {}))
         uid = event.get("user_id")
         if data.get("tool") != "eraser":
-            preferred = event.get("preferred_color", data.get("color", DEFAULT_USER_COLOR))
-            data["color"] = self.color_map.get(uid, normalize_color(preferred))
+            # Existing strokes keep the color they were drawn with; a color
+            # change only affects strokes made afterwards.
+            data["color"] = self.stroke_colors.resolve(event, self.color_map, self.current_preferences)
         rendered["data"] = data
         return rendered
 
     # -------------------------------------------------------- conversations
     def _entry_color(self, entry):
+        if entry.get("shown_color"):
+            return entry["shown_color"]
         uid = entry.get("uid")
         fallback = self.viewer_preferred_color if uid == self.viewer_id else entry.get("color")
         return self.color_map.get(uid, fallback)
@@ -331,6 +353,7 @@ class MainWindow:
             event.get("client_id"), event.get("username", "User"),
             event.get("message", ""), event.get("ts"))
         entry["color"] = event.get("preferred_color", event.get("color"))
+        entry["shown_color"] = self._entry_color(entry)  # later color changes don't recolor it
         if self.store.active == GROUP:
             self._display_entry(entry)
         else:
@@ -342,6 +365,7 @@ class MainWindow:
             event.get("to_client_id"), event.get("to_username", "User"),
             event.get("message", ""), event.get("ts"))
         entry["color"] = event.get("preferred_color", event.get("color"))
+        entry["shown_color"] = self._entry_color(entry)  # later color changes don't recolor it
         if peer_id == self.store.active:
             self._display_entry(entry)
         elif not entry["own"]:
@@ -363,6 +387,38 @@ class MainWindow:
                                   callback=lambda cid=key: self.open_private(cid))
         self._refresh_conversation_ui()
 
+    def copy_room_id(self):
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(self.room)
+            if hasattr(self, "whiteboard"):
+                self.whiteboard.update_status("Room ID copied. Share it with participants.")
+        except tk.TclError:
+            if hasattr(self, "whiteboard"):
+                self.whiteboard.update_status("Could not copy room ID.")
+            else:
+                messagebox.showwarning("CollabBoard", "Could not copy room ID.")
+
+    def _manage_role(self, client_id, role):
+        if self.role != "host":
+            return
+        self.sync.set_role(client_id, role)
+
+    def _send_cursor(self, x, y):
+        # Coalesce pointer events to avoid flooding the TCP stream.
+        import time
+        now = time.monotonic()
+        if now - getattr(self, "_last_cursor_sent", 0) >= 0.035:
+            self._last_cursor_sent = now
+            self.sync.send_cursor(x, y)
+
+    def _apply_role(self, role):
+        self.role = role
+        editable = role in ("host", "assistant")
+        self.whiteboard.set_read_only(not editable, can_clear=(role == "host"))
+        self.whiteboard.update_status(f"Role: {role.title()}")
+        self.participants.on_manage_role = self._manage_role if role == "host" else None
+
     # --------------------------------------------------------- event loop
     def process_events(self):
         try:
@@ -371,7 +427,11 @@ class MainWindow:
                 kind = event.get("type")
                 if kind == "joined_room":
                     self.viewer_id = event.get("client_id", self.viewer_id)
+                    self._apply_role(event.get("role", "student"))
                     self.store.set_viewer(self.viewer_id)
+                    # Re-apply presence from any participant list that arrived first.
+                    self.store.update_participants(self.live_users)
+                    self._refresh_header_and_composer()
                     self.viewer_preferred_color = normalize_color(
                         event.get("preferred_color", event.get("color", DEFAULT_USER_COLOR))
                     )
@@ -387,6 +447,14 @@ class MainWindow:
                 elif kind == "remote_draw":
                     self._rebuild_color_views()
                     self.whiteboard.apply_operation(self._event_with_viewer_color(event["event"]))
+                elif kind == "cursor":
+                    if event.get("client_id") != self.viewer_id:
+                        self.whiteboard.update_remote_cursor(event.get("client_id"),
+                            event.get("username", "User"),
+                            self.color_map.get(event.get("client_id"), event.get("color", "#64748B")),
+                            event.get("x", 0), event.get("y", 0))
+                elif kind == "role_changed":
+                    self._apply_role(event.get("role", "student"))
                 elif kind == "chat":
                     self._handle_group_chat(event)
                 elif kind == "private_message":
@@ -435,6 +503,7 @@ class MainWindow:
                     name = event.get("username") or next(
                         (u.get("username") for u in self.live_users if u.get("client_id") == uid), None)
                     self.live_users = [u for u in self.live_users if u.get("client_id") != uid]
+                    self.whiteboard.remove_remote_cursor(uid)
                     self._peer_left(uid, name)
                     self._notice(GROUP, f"{name} left the room" if name else "A participant left the room")
                     self._rebuild_color_views()
@@ -449,6 +518,7 @@ class MainWindow:
                     self.whiteboard.update_status("Synchronization error")
                     messagebox.showerror("Synchronization", event.get("message", "Unknown error"))
                 elif kind == "disconnected":
+                    self.whiteboard.clear_remote_cursors()
                     self.whiteboard.update_status("Disconnected from server")
                     messagebox.showwarning("Connection lost", "The connection to the server was lost. Close and reconnect.")
                 elif kind == "left_room":

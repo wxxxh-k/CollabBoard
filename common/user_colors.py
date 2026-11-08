@@ -105,3 +105,35 @@ def build_viewer_color_map(viewer_id, viewer_preferred_color, participants):
         assigned[person["client_id"]] = chosen
         used.add(chosen)
     return assigned
+
+
+class StrokeColorResolver:
+    """Keeps each drawing's display color fixed once it has been shown.
+
+    When a participant changes their color, only their *new* strokes use it.
+    A stroke's own draw-time color is carried in its event data. The first time
+    a stroke is rendered it gets the viewer-relative color (which resolves
+    collisions) if its author still has that color, otherwise its draw-time
+    color; the result is remembered so later redraws never recolor it.
+    """
+
+    def __init__(self):
+        self._cache = {}
+
+    def reset(self):
+        self._cache.clear()
+
+    def resolve(self, event, color_map, current_preferences):
+        data = event.get("data", {}) if isinstance(event.get("data"), dict) else {}
+        uid = event.get("user_id")
+        drawn = normalize_color(data.get("color", event.get("preferred_color", DEFAULT_USER_COLOR)))
+        key = (event.get("sequence"), uid, drawn)
+        if key in self._cache:
+            return self._cache[key]
+        current = current_preferences.get(uid)
+        if current is None or normalize_color(current) == drawn:
+            color = color_map.get(uid, drawn)
+        else:
+            color = drawn
+        self._cache[key] = color
+        return color

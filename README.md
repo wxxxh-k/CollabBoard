@@ -220,3 +220,43 @@ unknown ids, yourself, empty or oversized text and departed users are rejected w
 The workspace window is freely resizable (minimum 760 × 500). The whiteboard takes all
 spare space. Below 900 px wide the sidebar hides automatically (toggle it with the header
 button); the tool rail and participant list scroll when space is short.
+
+
+## Rooms, live cursors and roles
+
+### Create or join a room
+1. Start the server with `python -m server.server`.
+2. Start a desktop client with `python -m client.main`.
+3. Enter your username and server address. Choose **CREATE A ROOM** to create a room (you become its Host), or enter an existing room ID and choose **JOIN ROOM**.
+4. Use **Copy ID** in the workspace header to share the room code.
+
+Room membership and username uniqueness are validated by the server. Usernames are compared case-insensitively within a room. The room creator receives a private host credential that remains local to that client and is reused on reconnect; it is not shared with participants.
+
+### Roles
+- **Host**: can draw, edit, undo/redo, save/load, clear the board, and assign Assistant or Student roles.
+- **Assistant**: can draw and edit, but cannot clear the board or manage roles.
+- **Student**: read-only; drawing, undo/redo, clear and board restore requests are rejected by the server.
+
+The Host can right-click a participant in the Participants panel to assign Assistant or Student. Only the Host connection/host credential is authorized to change roles. The Clear Board control is visible only to the Host.
+
+### Live cursors
+Cursor positions are sent in board/world coordinates over the existing TCP message channel. The server broadcasts them only to the participant's room. Each viewer uses the existing collision-free participant color mapping, and cursor labels show the participant's username. Cursor markers are removed when a participant leaves or the connection is lost.
+
+### Verification
+Run the test suite from the project root:
+
+```bash
+python -m pytest -q
+```
+
+The suite covers the existing chat/network behavior and room-role/username logic.
+
+
+## Login roles, Create Room and Join Room
+
+The login screen has a **Select Role** dropdown (Host, Assistant, Student) and two side-by-side buttons.
+
+- **CREATE A ROOM** creates a new room with a unique generated Room ID (shown after creation and in the workspace header) and uses the Room Password field as the room password. Only the **Host** role can create a room.
+- **JOIN ROOM** joins an *existing* room using its Room ID and password. It never creates a room. Room IDs are matched ignoring case; wrong IDs/passwords show "Room does not exist", "Incorrect password" or "Password required".
+- The selected role is sent with every create, join and reconnect. Assistant and Student are granted as selected. Host is granted only to the room's creator (or the same username rejoining as Host); a second Host is rejected. A Host cannot rejoin as a different role by accident.
+- Rejoining uses the same Room ID, password and username. Rooms live in server memory, so they last until the server is restarted.

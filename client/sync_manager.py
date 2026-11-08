@@ -14,23 +14,88 @@ class SyncManager:
         self.username = None
         self.client_id = None
         self.last_sequence = 0
+        self.role = "student"
+        self.last_error = None
+        self.host_token = None
+        self.host_room_id = None
         self.event_lock = threading.RLock()
 
-    def join_room(self, host, port, room_id, username, password=None, color="#2563EB"):
+    def join_room(self, host, port, room_id, username, password=None, color="#2563EB", create_room=False,
+                  role=None):
         # Drop stale disconnect or event notifications from a previous connection.
         while self.network.get_message() is not None:
             pass
         self.client_id = None
         self.last_sequence = 0
+        self.last_error = None
         if not self.network.connect(host, port):
             return False
-        self.room_id, self.username = room_id, username
+        self.username = username
+        if create_room:
+            self.host_token = None
+            self.host_room_id = None
+            create_message = {"type": "create_room", "room_name": f"{username}'s Room",
+                              "password": password or None}
+            if role:
+                create_message["role"] = role
+            if not self.network.send_message(create_message):
+                return False
+            deadline = time.time() + 8
+            created = None
+            while time.time() < deadline:
+                response = self.network.get_message()
+                if response and response.get("type") == "room_created":
+                    created = response.get("room_id")
+                    self.host_token = response.get("host_token")
+                    self.host_room_id = created
+                    break
+                if response and response.get("type") == "error":
+                    self.last_error = response.get("message", "Could not create room")
+                    self.notify_gui(response)
+                    self.network.disconnect()
+                    return False
+                time.sleep(0.02)
+            if not created:
+                return False
+            room_id = created
+        self.room_id = room_id
         message = {"type": "join_room", "room_id": room_id, "username": username,
                    "color": color}
+        if role:
+            message["role"] = role
+        if self.host_token and self.host_room_id == room_id:
+            message["host_token"] = self.host_token
         if password:
             message["password"] = password
         if not self.network.send_message(message):
             return False
+        # Do not open the workspace until the server has atomically accepted
+        # the username and room membership.
+        deadline = time.time() + 8
+        accepted = None
+        while time.time() < deadline:
+            response = self.network.get_message()
+            if response and response.get("type") in ("joined_room", "error"):
+                accepted = response
+                break
+            time.sleep(0.02)
+        if not accepted or accepted.get("type") != "joined_room":
+            if accepted:
+                self.last_error = accepted.get("message", "Could not join room")
+                self.notify_gui(accepted)
+            else:
+                self.last_error = "The server did not respond in time."
+            self.network.disconnect()
+            return False
+        # Use the server's canonical Room ID (it matches IDs ignoring case).
+        self.room_id = accepted.get("room_id") or self.room_id
+        # Deliver joined_room right now, before anything that arrived behind it
+        # (participants, snapshot...). Re-queueing it would put it *after* them,
+        # and the workspace then treats every already-present participant as
+        # offline ("has left the room") in private chat.
+        self.client_id = accepted.get("client_id")
+        self.role = accepted.get("role", "student")
+        self.notify_gui(accepted)
         self.running = True
         self.receiver_thread = threading.Thread(target=self.process_messages, daemon=True)
         self.receiver_thread.start()
@@ -41,6 +106,12 @@ class SyncManager:
             return False
         data = operation.get("data", operation)
         return self.network.send_message({"type": "draw", "data": data})
+
+    def send_cursor(self, x, y):
+        return self.network.send_message({"type": "cursor_move", "x": x, "y": y})
+
+    def set_role(self, client_id, role):
+        return self.network.send_message({"type": "set_role", "client_id": client_id, "role": role})
 
     def set_user_color(self, color):
         return self.network.send_message({"type": "set_user_color", "color": color})
@@ -83,6 +154,7 @@ class SyncManager:
                 break
             if kind == "joined_room":
                 self.client_id = message.get("client_id")
+                self.role = message.get("role", "student")
                 self.notify_gui(message)
             elif kind == "board_snapshot":
                 self.handle_snapshot(message)

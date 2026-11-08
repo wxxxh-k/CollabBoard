@@ -95,7 +95,12 @@ class NetworkClient:
             if self.connected:
                 print("Receive error:", error)
         finally:
-            self.connected = False
+            # A newer connection may already have replaced this one (e.g. an
+            # immediate retry after a failed join). Only the reader of the
+            # current connection may change shared state or report a disconnect.
+            superseded = self.sock is not None and self.sock is not sock
+            if not superseded:
+                self.connected = False
             if outbox is not None:
                 outbox.put(None)  # stop the writer thread of this connection
             if sock:
@@ -105,7 +110,8 @@ class NetworkClient:
                     pass
             if self.sock is sock:
                 self.sock = None
-            self.message_queue.put({"type": DISCONNECTED})
+            if not superseded:
+                self.message_queue.put({"type": DISCONNECTED})
 
     def get_message(self):
         try:

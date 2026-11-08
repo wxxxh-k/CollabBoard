@@ -9,7 +9,7 @@ MESSAGE_TYPES = {
     "leave_room", "left_room", "draw", "chat", "participants",
     "participant_joined", "participant_left", "board_snapshot",
     "clear", "undo", "redo", "save_board", "load_board", "set_user_color",
-    "user_color_changed",
+    "user_color_changed", "cursor_move", "cursor", "role_update", "role_changed",
     # Messaging: "chat" is the room-wide group chat (kept for backward
     # compatibility). "private_message" is a one-to-one message addressed by
     # client id; "private_message_failed" tells only the sender why it was

@@ -21,11 +21,12 @@ class ParticipantsPanel(tk.Frame):
     """
     ROW_H = 36
 
-    def __init__(self, parent, username, on_open_private=None, on_open_group=None):
+    def __init__(self, parent, username, on_open_private=None, on_open_group=None, on_manage_role=None):
         super().__init__(parent, bg=theme.BG_APP)
         self.username = username
         self.on_open_private = on_open_private
         self.on_open_group = on_open_group
+        self.on_manage_role = on_manage_role
         self.users = []            # live participants (as sent by the server)
         self.offline = []          # [(client_id, username)] kept visible while unread/open
         self.viewer_id = None
@@ -124,7 +125,7 @@ class ParticipantsPanel(tk.Frame):
     # ------------------------------------------------------------ rendering
     def _signature(self):
         people = tuple((u.get("client_id"), u.get("username"),
-                        u.get("display_color", u.get("color"))) if isinstance(u, dict) else (None, u, None)
+                        u.get("display_color", u.get("color")), u.get("role")) if isinstance(u, dict) else (None, u, None)
                        for u in self._display_users)
         return (people, tuple(self.offline), self.viewer_id, self.active,
                 tuple(sorted((str(k), v) for k, v in self.unread.items() if v)))
@@ -190,6 +191,22 @@ class ParticipantsPanel(tk.Frame):
             pass
 
     # ----------------------------------------------------------------- rows
+    def _manage_context(self, event, row):
+        if not self.on_manage_role:
+            return
+        try:
+            menu = tk.Menu(self, tearoff=0)
+            menu.add_command(label="Make Assistant",
+                             command=lambda: self.on_manage_role(row._client_id, "assistant"))
+            menu.add_command(label="Make Student",
+                             command=lambda: self.on_manage_role(row._client_id, "student"))
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            try:
+                menu.grab_release()
+            except Exception:
+                pass
+
     def _new_row(self, parent, key, clickable, on_click):
         active = key == self.active
         bg = ROW_ACTIVE if active else ROW_BG
@@ -200,6 +217,7 @@ class ParticipantsPanel(tk.Frame):
         bar._keep_bg = True
         bar.pack(side="left", fill="y")
         row._active = active
+        row._client_id = key
         row._clickable = clickable
         row._on_click = on_click
         return row
@@ -211,6 +229,10 @@ class ParticipantsPanel(tk.Frame):
                 widget.bind("<Enter>", lambda _e: self._paint(row, ROW_HOVER), add="+")
                 widget.bind("<Leave>", lambda _e: self._on_row_leave(row), add="+")
                 widget.bind("<Button-1>", lambda _e: row._on_click(), add="+")
+                try:
+                    widget.bind("<Button-3>", lambda e, r=row: self._manage_context(e, r), add="+")
+                except tk.TclError:
+                    pass
                 try:
                     widget.configure(cursor="hand2")
                 except tk.TclError:
@@ -278,6 +300,11 @@ class ParticipantsPanel(tk.Frame):
         swatch.pack(side="left", padx=(8, 7))
         tk.Label(row, text=name, fg="white" if online else theme.TEXT_DIM, bg=bg, anchor="w",
                  font=(theme.FONT, 9, "bold")).pack(side="left")
+        user_data = next((u for u in self._display_users if isinstance(u, dict) and u.get("client_id") == client_id), {})
+        role = user_data.get("role")
+        if role:
+            tk.Label(row, text=role.upper(), fg="#A5B4FC", bg=bg,
+                     font=(theme.FONT, 7, "bold")).pack(side="left", padx=(5, 0))
         if is_self:
             tk.Label(row, text="you", fg=theme.TEXT_MUTED, bg=bg,
                      font=(theme.FONT, 8)).pack(side="left", padx=(5, 0))

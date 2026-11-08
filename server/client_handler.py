@@ -5,6 +5,7 @@ import threading
 import time
 import uuid
 from common.protocol import MAX_MESSAGE_SIZE, MAX_CHAT_LENGTH
+from server.session_manager import ROLES
 
 class ClientHandler(threading.Thread):
     def __init__(self, client_socket, address, session_manager, canvas_manager, persistence_manager):
@@ -59,8 +60,18 @@ class ClientHandler(threading.Thread):
             if password is not None and not isinstance(password, str):
                 self.send_message({"type": "error", "message": "Invalid password"})
                 return
-            room_id = self.session_manager.create_room(room_name.strip(), password)
-            self.send_message({"type": "room_created", "room_id": room_id, "room_name": room_name.strip()})
+            # Whoever creates a room becomes its Host, so a different selected
+            # role cannot be honoured for creation.
+            create_role = message.get("role")
+            if create_role is not None and create_role != "host":
+                self.send_message({"type": "error",
+                                   "message": "Only the Host role can create a room. Select Host to create one."})
+                return
+            room_id = self.session_manager.create_room(room_name.strip(), password, owner_handler=self)
+            room = self.session_manager.get_room(room_id)
+            self.send_message({"type": "room_created", "room_id": room_id,
+                               "room_name": room_name.strip(),
+                               "host_token": room.get("host_token")})
             return
 
         if kind == "join_room":
@@ -79,7 +90,22 @@ class ClientHandler(threading.Thread):
             if password is not None and not isinstance(password, str):
                 self.send_message({"type": "error", "message": "Invalid password"})
                 return
+            requested_role = message.get("role")
+            if requested_role is not None:
+                requested_role = requested_role.strip().lower() if isinstance(requested_role, str) else None
+                if requested_role not in ROLES:
+                    self.send_message({"type": "error", "message": "Invalid role"})
+                    return
+            # Match the Room ID ignoring case; this only looks rooms up and never creates one.
+            resolved_room = self.session_manager.resolve_room_id(room_id.strip())
+            if resolved_room is None:
+                self.send_message({"type": "error", "message": "Room does not exist"})
+                return
+            room_id = resolved_room
             self.username = username.strip()
+            self.requested_role = requested_role
+            token = message.get("host_token")
+            self.host_token = token if isinstance(token, str) and len(token) <= 256 else None
             requested_color = message.get("color", "#2563EB")
             if not isinstance(requested_color, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", requested_color):
                 requested_color = "#2563EB"
@@ -92,11 +118,11 @@ class ClientHandler(threading.Thread):
             self.send_message({"type": "joined_room", "room_id": self.room_id,
                                "client_id": self.client_id, "username": self.username,
                                "preferred_color": self.requested_color,
-                               "color": self.user_color})
+                               "color": self.user_color, "role": self.role})
             self.send_snapshot()
             self.broadcast({"type": "participant_joined", "client_id": self.client_id,
                             "username": self.username, "color": self.requested_color,
-                            "preferred_color": self.requested_color})
+                            "preferred_color": self.requested_color, "role": self.role})
             self.broadcast_participants()
             return
 
@@ -112,7 +138,30 @@ class ClientHandler(threading.Thread):
             self.send_message({"type": "error", "message": "Join a room first"})
             return
 
-        if kind == "draw":
+        role = self.session_manager.get_role(self.room_id, self.client_id)
+        if kind == "cursor_move":
+            x, y = message.get("x"), message.get("y")
+            if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+                return
+            if not (-100000 <= x <= 100000 and -100000 <= y <= 100000):
+                return
+            self.broadcast({"type": "cursor", "client_id": self.client_id,
+                            "username": self.username, "color": self.requested_color,
+                            "x": float(x), "y": float(y)}, self.room_id)
+        elif kind == "set_role":
+            target_id, new_role = message.get("client_id"), message.get("role")
+            ok, result = self.session_manager.set_role(self.room_id, self.client_id, target_id, new_role)
+            if not ok:
+                self.send_message({"type": "error", "message": result})
+                return
+            target = self.session_manager.get_client(self.room_id, target_id)
+            if target:
+                target.send_message({"type": "role_changed", "client_id": target_id, "role": result})
+            self.broadcast_participants()
+        elif kind == "draw":
+            if role not in ("host", "assistant"):
+                self.send_message({"type": "error", "message": "Students have read-only access"})
+                return
             data = message.get("data")
             if not isinstance(data, dict) or len(json.dumps(data)) > 50000:
                 self.send_message({"type": "error", "message": "Invalid or oversized drawing event"})
@@ -158,14 +207,23 @@ class ClientHandler(threading.Thread):
         elif kind == "private_message":
             self.handle_private_message(message)
         elif kind == "undo":
+            if role not in ("host", "assistant"):
+                self.send_message({"type": "error", "message": "Students have read-only access"})
+                return
             snapshot = self.canvas_manager.undo(self.room_id, self.client_id)
             if snapshot is not None:
                 self.broadcast({"type": "board_snapshot", **snapshot})
         elif kind == "redo":
+            if role not in ("host", "assistant"):
+                self.send_message({"type": "error", "message": "Students have read-only access"})
+                return
             snapshot = self.canvas_manager.redo(self.room_id, self.client_id)
             if snapshot is not None:
                 self.broadcast({"type": "board_snapshot", **snapshot})
         elif kind == "clear":
+            if role != "host":
+                self.send_message({"type": "error", "message": "Only the host can clear the board"})
+                return
             snapshot = self.canvas_manager.clear_board(self.room_id)
             if snapshot is not None:
                 self.broadcast({"type": "board_snapshot", **snapshot})
@@ -179,6 +237,9 @@ class ClientHandler(threading.Thread):
             success = self.persistence_manager.save_board(self.room_id, board or [])
             self.send_message({"type": "save_result", "success": success})
         elif kind == "load_board":
+            if role not in ("host", "assistant"):
+                self.send_message({"type": "error", "message": "Students have read-only access"})
+                return
             board = self.persistence_manager.load_board(self.room_id)
             if board is None:
                 self.send_message({"type": "error", "message": "No saved board found"})
@@ -238,7 +299,8 @@ class ClientHandler(threading.Thread):
             return
         participants = [{"client_id": cid, "username": handler.username,
                   "color": getattr(handler, "requested_color", "#475569"),
-                  "preferred_color": getattr(handler, "requested_color", "#475569")}
+                  "preferred_color": getattr(handler, "requested_color", "#475569"),
+                  "role": self.session_manager.get_role(self.room_id, cid)}
                  for cid, handler in self.session_manager.get_clients(self.room_id)]
         self.send_message({"type": "participants", "participants": participants})
 
@@ -247,7 +309,8 @@ class ClientHandler(threading.Thread):
             return
         participants = [{"client_id": cid, "username": handler.username,
                   "color": getattr(handler, "requested_color", "#475569"),
-                  "preferred_color": getattr(handler, "requested_color", "#475569")}
+                  "preferred_color": getattr(handler, "requested_color", "#475569"),
+                  "role": self.session_manager.get_role(self.room_id, cid)}
                  for cid, handler in self.session_manager.get_clients(self.room_id)]
         self.broadcast({"type": "participants", "participants": participants})
 
@@ -262,7 +325,8 @@ class ClientHandler(threading.Thread):
         self.send_message({"type": "left_room"})
         remaining = [{"client_id": cid, "username": handler.username,
                       "color": getattr(handler, "requested_color", "#475569"),
-                  "preferred_color": getattr(handler, "requested_color", "#475569")}
+                  "preferred_color": getattr(handler, "requested_color", "#475569"),
+                  "role": self.session_manager.get_role(old_room, cid)}
                      for cid, handler in self.session_manager.get_clients(old_room)]
         self.broadcast({"type": "participants", "participants": remaining}, old_room)
 

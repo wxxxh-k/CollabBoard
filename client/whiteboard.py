@@ -34,6 +34,9 @@ class Whiteboard:
         self.on_save = on_save
         self.on_load = on_load
         self.on_color_change = None
+        self.on_cursor_move = None
+        self.remote_cursors = {}
+        self.remote_cursor_positions = {}
         self.tool, self.color, self.width = "pen", "#2563EB", 3
         self.user_color = "#2563EB"       # actual server-assigned drawing color
         self.preferred_color = "#2563EB"  # user's requested preference
@@ -94,9 +97,11 @@ class Whiteboard:
                    "Restore the saved board", size=34).pack(side="left", padx=1, pady=8)
         tk.Frame(self.history_group, width=1, bg=theme.BORDER).pack(
             side="left", fill="y", padx=6, pady=12)
-        IconButton(self.history_group, "trash", self.request_clear,
-                   "Clear the board for everyone", size=34, danger=True).pack(
-                       side="left", padx=1, pady=8)
+        self.clear_button = IconButton(self.history_group, "trash", self.request_clear,
+                   "Clear the board for everyone", size=34, danger=True)
+        self.clear_button.pack(side="left", padx=1, pady=8)
+        self.read_only = False
+        self.can_clear = True
 
         # ---- body: tool rail + canvas
         body = tk.Frame(self.frame, bg=theme.BG_BOARD)
@@ -105,6 +110,7 @@ class Whiteboard:
 
         holder = tk.Frame(body, bg=theme.BG_WORKSPACE, highlightthickness=1,
                           highlightbackground=theme.BORDER)
+        self.canvas_holder = holder
         holder.pack(side="left", fill="both", expand=True)
         self.canvas = tk.Canvas(holder, bg=theme.BG_WORKSPACE, cursor="crosshair",
                                 highlightthickness=0, bd=0, takefocus=1)
@@ -161,6 +167,21 @@ class Whiteboard:
             callback()
 
     # ------------------------------------------------------------ settings
+    def set_read_only(self, read_only, can_clear=False):
+        self.read_only = bool(read_only)
+        self.can_clear = bool(can_clear)
+        if self.read_only:
+            self.select_tool("hand")
+            self.toolbar.frame.pack_forget()
+            self.history_group.pack_forget()
+        else:
+            self.toolbar.frame.pack(side="left", fill="y", padx=(0, 8),
+                                    before=self.canvas_holder)
+            self.history_group.pack(side="left", padx=(4, 0))
+        self.clear_button.pack_forget()
+        if self.can_clear:
+            self.clear_button.pack(side="left", padx=1, pady=8)
+
     def select_tool(self, tool):
         self.tool = tool
         self._remove_ring()
@@ -324,6 +345,9 @@ class Whiteboard:
             self._draw_page()
             for operation in self.operations:
                 self._render_operation(operation)
+            self.remote_cursors.clear()
+            for client_id, (username, color, x, y) in self.remote_cursor_positions.items():
+                self.update_remote_cursor(client_id, username, color, x, y)
         except tk.TclError:
             pass  # window is closing
 
@@ -494,9 +518,48 @@ class Whiteboard:
     # ----------------------------------------------------- pointer feedback
     def _on_motion(self, event):
         wx, wy = self.view.to_world(event.x, event.y)
+        if self.on_cursor_move and self.view.inside_page(wx, wy):
+            self.on_cursor_move(wx, wy)
         self.coords.config(text=f"x {int(wx)}   y {int(wy)}" if self.view.inside_page(wx, wy) else "")
         if not self.points and not self._panning:
             self._update_ring(event)
+
+    def update_remote_cursor(self, client_id, username, color, x, y):
+        """Render another participant's pointer in shared page/world coordinates."""
+        self.remote_cursor_positions[client_id] = (username, color, float(x), float(y))
+        try:
+            sx, sy = self.view.to_screen(float(x), float(y))
+            if client_id not in self.remote_cursors:
+                dot = self.canvas.create_oval(sx-5, sy-5, sx+5, sy+5,
+                                              fill=color, outline="#FFFFFF", width=1,
+                                              tags=("remote_cursor",))
+                label = self.canvas.create_text(sx+9, sy-10, text=username,
+                                                anchor="sw", fill=color,
+                                                font=("Arial", 9, "bold"),
+                                                tags=("remote_cursor",))
+                self.remote_cursors[client_id] = (dot, label)
+            else:
+                dot, label = self.remote_cursors[client_id]
+                self.canvas.coords(dot, sx-5, sy-5, sx+5, sy+5)
+                self.canvas.coords(label, sx+9, sy-10)
+                self.canvas.itemconfigure(dot, fill=color)
+                self.canvas.itemconfigure(label, text=username, fill=color)
+            self.canvas.tag_raise("remote_cursor")
+        except (tk.TclError, TypeError, ValueError):
+            pass
+
+    def remove_remote_cursor(self, client_id):
+        self.remote_cursor_positions.pop(client_id, None)
+        items = self.remote_cursors.pop(client_id, ())
+        for item in items:
+            try:
+                self.canvas.delete(item)
+            except tk.TclError:
+                pass
+
+    def clear_remote_cursors(self):
+        for client_id in list(self.remote_cursors):
+            self.remove_remote_cursor(client_id)
 
     def _on_leave(self, _event=None):
         self._remove_ring()
