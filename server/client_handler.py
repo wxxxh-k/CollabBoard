@@ -2,7 +2,9 @@ import json
 import re
 import socket
 import threading
-from common.protocol import MAX_MESSAGE_SIZE
+import time
+import uuid
+from common.protocol import MAX_MESSAGE_SIZE, MAX_CHAT_LENGTH
 
 class ClientHandler(threading.Thread):
     def __init__(self, client_socket, address, session_manager, canvas_manager, persistence_manager):
@@ -144,12 +146,17 @@ class ClientHandler(threading.Thread):
             self.broadcast_participants()
         elif kind == "chat":
             text = message.get("message")
-            if not isinstance(text, str) or not text.strip() or len(text) > 2000:
+            if not isinstance(text, str) or not text.strip() or len(text) > MAX_CHAT_LENGTH:
                 self.send_message({"type": "error", "message": "Chat messages must contain 1-2000 characters"})
                 return
-            self.broadcast({"type": "chat", "client_id": self.client_id,
+            # Group chat: room-wide broadcast to every participant (including
+            # the sender, whose client renders the echoed message).
+            self.broadcast({"type": "chat", "scope": "group", "client_id": self.client_id,
                             "username": self.username, "preferred_color": self.requested_color,
-                            "color": self.requested_color, "message": text.strip()})
+                            "color": self.requested_color, "message": text.strip(),
+                            "ts": int(time.time())})
+        elif kind == "private_message":
+            self.handle_private_message(message)
         elif kind == "undo":
             snapshot = self.canvas_manager.undo(self.room_id, self.client_id)
             if snapshot is not None:
@@ -181,6 +188,46 @@ class ClientHandler(threading.Thread):
         else:
             self.send_message({"type": "error", "message": f"Unknown message type: {kind}"})
 
+    def handle_private_message(self, message):
+        """Route a one-to-one message to its recipient and echo it to the sender.
+
+        The sender is always the authenticated connection (self.client_id), never
+        a value supplied by the client, and the recipient is resolved by client id
+        strictly inside the sender's own room. Nothing is broadcast.
+        """
+        recipient_id = message.get("to_client_id")
+        text = message.get("message")
+        safe_id = recipient_id if isinstance(recipient_id, str) and len(recipient_id) <= 64 else None
+        safe_text = text if isinstance(text, str) and len(text) <= MAX_CHAT_LENGTH else None
+
+        def fail(reason):
+            self.send_message({"type": "private_message_failed", "to_client_id": safe_id,
+                               "text": safe_text, "reason": reason})
+
+        if safe_id is None or not safe_id.strip():
+            fail("Invalid recipient")
+            return
+        if not isinstance(text, str) or not text.strip() or len(text) > MAX_CHAT_LENGTH:
+            fail("Private messages must contain 1-2000 characters")
+            return
+        if safe_id == self.client_id:
+            fail("You cannot send a private message to yourself")
+            return
+        recipient = self.session_manager.get_client(self.room_id, safe_id)
+        if recipient is None:
+            fail("That participant is not in this room (they may have left)")
+            return
+        payload = {"type": "private_message", "message_id": uuid.uuid4().hex,
+                   "from_client_id": self.client_id, "from_username": self.username,
+                   "to_client_id": safe_id, "to_username": recipient.username,
+                   "preferred_color": self.requested_color, "color": self.requested_color,
+                   "message": text.strip(), "ts": int(time.time())}
+        if not recipient.send_message(payload):
+            fail(f"{recipient.username} is offline")
+            return
+        # Echo to the sender so both sides render the same server-confirmed message.
+        self.send_message(payload)
+
     def send_snapshot_to_room(self):
         snapshot = self.canvas_manager.snapshot(self.room_id)
         if snapshot is not None:
@@ -210,7 +257,8 @@ class ClientHandler(threading.Thread):
         old_room, old_client = self.room_id, self.client_id
         self.session_manager.leave_room(old_room, old_client)
         self.room_id = self.client_id = None
-        self.broadcast({"type": "participant_left", "client_id": old_client}, old_room)
+        self.broadcast({"type": "participant_left", "client_id": old_client,
+                        "username": self.username}, old_room)
         self.send_message({"type": "left_room"})
         remaining = [{"client_id": cid, "username": handler.username,
                       "color": getattr(handler, "requested_color", "#475569"),

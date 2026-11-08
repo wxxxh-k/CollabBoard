@@ -12,5 +12,14 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode_message({"message": "missing type"})
 
+    def test_private_message_types_are_registered_and_framed(self):
+        from common.protocol import MESSAGE_TYPES
+        self.assertIn("private_message", MESSAGE_TYPES)
+        self.assertIn("private_message_failed", MESSAGE_TYPES)
+        message = {"type": "private_message", "to_client_id": "abc", "message": "héllo \u2714"}
+        encoded = encode_message(message)
+        self.assertEqual(encoded.count(b"\n"), 1)  # one frame, newline-terminated
+        self.assertEqual(decode_message(encoded[:-1]), message)
+
 if __name__ == "__main__":
     unittest.main()

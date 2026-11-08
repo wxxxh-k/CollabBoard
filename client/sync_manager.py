@@ -46,7 +46,14 @@ class SyncManager:
         return self.network.send_message({"type": "set_user_color", "color": color})
 
     def send_chat(self, message):
+        """Send a message to the room's group chat."""
         return self.network.send_message({"type": "chat", "message": message})
+
+    def send_private_message(self, to_client_id, message):
+        """Send a one-to-one message addressed by the recipient's client id."""
+        return self.network.send_message({"type": "private_message",
+                                          "to_client_id": to_client_id,
+                                          "message": message})
 
     def undo(self):
         return self.network.send_message({"type": "undo"})

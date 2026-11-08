@@ -10,8 +10,16 @@ MESSAGE_TYPES = {
     "participant_joined", "participant_left", "board_snapshot",
     "clear", "undo", "redo", "save_board", "load_board", "set_user_color",
     "user_color_changed",
+    # Messaging: "chat" is the room-wide group chat (kept for backward
+    # compatibility). "private_message" is a one-to-one message addressed by
+    # client id; "private_message_failed" tells only the sender why it was
+    # not delivered.
+    "private_message", "private_message_failed",
     "save_result", "error", "ping", "pong"
 }
+
+# Limits shared by the client and the server.
+MAX_CHAT_LENGTH = 2000
 
 def encode_message(message):
     if not isinstance(message, dict) or not isinstance(message.get("type"), str):

@@ -170,6 +170,18 @@ class SessionManager:
 
             return []
 
+    def get_client(self, room_id, client_id):
+        """Return the handler for client_id, but only if it is in room_id.
+
+        Looking the recipient up inside the sender's own room is what keeps
+        private messages from ever crossing room boundaries.
+        """
+        with self.lock:
+            room = self.rooms.get(room_id)
+            if room is None:
+                return None
+            return room["clients"].get(client_id)
+
     # --------------------------------
     # GET ROOM INFORMATION
     # --------------------------------

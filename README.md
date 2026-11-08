@@ -177,3 +177,46 @@ Run tests with `python -m unittest discover -s tests -v`.
 ## Responsive desktop layout
 
 The client window now opens at a size that fits the available display and can be resized or maximized. The board/sidebar divider is draggable. The participant list has its own scrollbar, so additional users do not push the chat composer off-screen. The participant area is height-bounded while chat receives the remaining sidebar space. The drawing toolbar is vertically scrollable on shorter displays.
+
+
+## Messaging: group chat and private chat
+
+Every room has a **Group Chat** (the default conversation when you join). Everyone in
+the room sends to it and receives from it (`chat` event, room broadcast).
+
+To talk privately, **click a participant's name** in the Participants panel. The chat
+header switches to that person ("Private · only you and Name", with a blue accent line
+and a back arrow). Use the back arrow, or the **Group Chat** row at the top of the
+participants list, to return. Each conversation keeps its own history and unsent draft
+for the session. A new private message shows an unread badge on that person's row, a
+banner in the chat (click it to open), and "Show chat · N new" if the sidebar is hidden.
+
+Protocol (newline-delimited JSON, framing unchanged):
+
+| Event | Direction | Fields |
+|---|---|---|
+| `chat` | client → server | `message` |
+| `chat` | server → whole room | `scope:"group"`, `client_id`, `username`, `message`, `ts`, colors |
+| `private_message` | client → server | `to_client_id`, `message` |
+| `private_message` | server → recipient **and** sender only | `message_id`, `from_client_id`, `from_username`, `to_client_id`, `to_username`, `message`, `ts` |
+| `private_message_failed` | server → sender only | `to_client_id`, `text`, `reason` |
+| `participant_left` | server → room | `client_id`, `username` (username is new) |
+
+The server takes the sender from the authenticated connection (it cannot be spoofed),
+looks the recipient up by **client id inside the sender's own room only** (other rooms,
+unknown ids, yourself, empty or oversized text and departed users are rejected with
+`private_message_failed`), and never broadcasts private messages.
+
+## Whiteboard navigation
+
+- **Zoom:** mouse wheel (at the cursor), `+` / `-`, or the zoom buttons; click the percentage to reset to 100%.
+- **Fit to window:** the fit button or `0`. The board refits automatically on window resize until you zoom or pan.
+- **Pan:** Hand tool, hold **Space** and drag, middle/right mouse drag, or Shift + wheel.
+- **Undo / Redo:** `Ctrl+Z` / `Ctrl+Y` (when the board has focus) or the top-bar buttons.
+- Drawings are stored in *world* coordinates on a 1920 × 1080 page, so they are identical for every participant at any zoom, pan or window size.
+
+## Window resizing
+
+The workspace window is freely resizable (minimum 760 × 500). The whiteboard takes all
+spare space. Below 900 px wide the sidebar hides automatically (toggle it with the header
+button); the tool rail and participant list scroll when space is short.
