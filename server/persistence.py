@@ -1,10 +1,16 @@
 import json
 import os
+import sys
 
 from pathlib import Path
 
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+# When packaged as an .exe, keep the data folder next to the executable
+# (the bundled source files live in a temporary folder that is deleted on exit).
+if getattr(sys, "frozen", False):
+    BASE_DIR = Path(sys.executable).resolve().parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent.parent
 
 DATA_DIR = BASE_DIR / "data"
 

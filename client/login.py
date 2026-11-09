@@ -1,5 +1,6 @@
 
 import json
+import sys
 from pathlib import Path
 import tkinter as tk
 from tkinter import messagebox, ttk
@@ -22,7 +23,9 @@ class LoginWindow:
         self.root.configure(bg="#171923")
 
         self.selected_color = DEFAULT_USER_COLOR
-        self.user_history_path = Path(__file__).resolve().parents[1] / "data" / "users.json"
+        base_dir = (Path(sys.executable).resolve().parent if getattr(sys, "frozen", False)
+                    else Path(__file__).resolve().parents[1])
+        self.user_history_path = base_dir / "data" / "users.json"
         self.user_history = self._load_user_history()
         self.create_widgets()
 
